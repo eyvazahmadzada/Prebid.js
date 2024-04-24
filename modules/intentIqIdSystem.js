@@ -10,6 +10,7 @@ import { ajax } from '../src/ajax.js';
 import { submodule } from '../src/hook.js'
 import { getStorageManager } from '../src/storageManager.js';
 import { MODULE_TYPE_UID } from '../src/activities/modules.js';
+import { gdprDataHandler, gppDataHandler, uspDataHandler } from '../src/consentHandler.js';
 
 /**
  * @typedef {import('../modules/userId/index.js').Submodule} Submodule
@@ -59,6 +60,7 @@ export function readData(key) {
   }
 }
 
+
 /**
  * Store Intent IQ data in either cookie or local storage
  * expiration date: 365 days
@@ -77,6 +79,24 @@ function storeData(key, value, cookieStorageEnabled = false) {
       if (storage.cookiesAreEnabled() && cookieStorageEnabled) {
         storage.setCookie(key, value, expiresStr, 'LAX');
       }
+    }
+  } catch (error) {
+    logError(error);
+  }
+}
+
+/**
+ * Remove Intent IQ data from cookie or local storage
+ * @param key
+ */
+export function removeData(key) {
+  try {
+    if (storage.hasLocalStorage()) {
+      storage.removeDataFromLocalStorage(key);
+    }
+    if (storage.cookiesAreEnabled()) {
+      const expiredDate = new Date(0).toUTCString();
+      storage.setCookie(key, '', expiredDate, 'LAX');
     }
   } catch (error) {
     logError(error);
@@ -125,16 +145,49 @@ export const intentIqIdSubmodule = {
       logError('User ID - intentIqId submodule requires a valid partner to be defined');
       return;
     }
+
+    // Get consent information
+    const cmpData = {}
+    const uspData = uspDataHandler.getConsentData()
+    const gdprData = gdprDataHandler.getConsentData()
+    const gppData = gppDataHandler.getConsentData()
+    let isOptOut = false;
+
+    if (uspData) {
+      cmpData.us_privacy = uspData;
+    }
+  
+    if (gdprData) {
+      cmpData.gdpr = Number(Boolean(gdprData.gdprApplies));
+      cmpData.gdpr_consent = gdprData.consentString || '';
+    }
+  
+    if (gppData) {
+      cmpData.gpp = gppData.gppString;
+      cmpData.gpp_sid = gppData.applicableSections;
+      isOptOut = true;
+    }
+
     const cookieStorageEnabled = typeof configParams.enableCookieStorage === 'boolean' ? configParams.enableCookieStorage : false
     if (!FIRST_PARTY_DATA_KEY.includes(configParams.partner)) { FIRST_PARTY_DATA_KEY += '_' + configParams.partner; }
     let rrttStrtTime = 0;
 
     // Read Intent IQ 1st party id or generate it if none exists
     let firstPartyData = tryParse(readData(FIRST_PARTY_KEY));
+
+    // Remove any existing data if GDPR applies
+    if(isOptOut) {
+      removeData(FIRST_PARTY_KEY);
+    }
+
     if (!firstPartyData || !firstPartyData.pcid || firstPartyData.pcidDate) {
       const firstPartyId = generateGUID();
       firstPartyData = { 'pcid': firstPartyId, 'pcidDate': Date.now() };
-      storeData(FIRST_PARTY_KEY, JSON.stringify(firstPartyData), cookieStorageEnabled);
+
+      // No data storage initially if GDPR applies
+      if(!isOptOut) {
+        storeData(FIRST_PARTY_KEY, JSON.stringify(firstPartyData), cookieStorageEnabled);
+      }
     }
 
     let partnerData = tryParse(readData(FIRST_PARTY_DATA_KEY));
@@ -149,6 +202,11 @@ export const intentIqIdSubmodule = {
     url += (partnerData.cttl) ? '&cttl=' + encodeURIComponent(partnerData.cttl) : '';
     url += (partnerData.rrtt) ? '&rrtt=' + encodeURIComponent(partnerData.rrtt) : '';
     url += firstPartyData.pcidDate ? '&iiqpciddate=' + encodeURIComponent(firstPartyData.pcidDate) : '';
+    url += cmpData.us_privacy ? '&us_privacy=' + encodeURIComponent(cmpData.us_privacy) : '';
+    url += cmpData.gdpr ? '&gdpr=' + encodeURIComponent(cmpData.gdpr) : '';
+    url += cmpData.gdpr_consent ? '&gdpr_consent=' + encodeURIComponent(cmpData.gdpr_consent) : '';
+    url += cmpData.gpp ? '&gpp=' + encodeURIComponent(cmpData.gpp) : '';
+    url += cmpData.gpp_sid ? '&gpp_sid=' + encodeURIComponent(cmpData.gpp_sid) : '';
 
     const resp = function (callback) {
       const callbacks = {
@@ -158,6 +216,11 @@ export const intentIqIdSubmodule = {
           if (respJson && respJson.ls) {
             // Store pid field if found in response json
             let shouldUpdateLs = false;
+            if ('isOptOut' in respJson && respJson.isOptOut !== isOptOut) {
+              isOptOut = respJson.isOptOut;
+              firstPartyData.pid = respJson.pid;
+              shouldUpdateLs = true;
+            }
             if ('pid' in respJson) {
               firstPartyData.pid = respJson.pid;
               shouldUpdateLs = true;
