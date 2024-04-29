@@ -175,6 +175,7 @@ export const intentIqIdSubmodule = {
     if (gdprData) {
       cmpData.gdpr = Number(Boolean(gdprData.gdprApplies));
       cmpData.gdpr_consent = gdprData.consentString || '';
+      isOptOut = true;
     }
   
     if (gppData) {
@@ -183,9 +184,7 @@ export const intentIqIdSubmodule = {
       if(gppData.parsedSections && 'usnat' in gppData.parsedSections) {
         cmpData.gpp = handleGPPData(gppData.parsedSections['usnat']);
       }
-
       cmpData.gpp_sid = gppData.applicableSections;
-      isOptOut = true;
     }
 
     const cookieStorageEnabled = typeof configParams.enableCookieStorage === 'boolean' ? configParams.enableCookieStorage : false
