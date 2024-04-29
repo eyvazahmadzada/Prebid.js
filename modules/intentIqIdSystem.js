@@ -60,7 +60,6 @@ export function readData(key) {
   }
 }
 
-
 /**
  * Store Intent IQ data in either cookie or local storage
  * expiration date: 365 days
@@ -117,6 +116,22 @@ function tryParse(data) {
   }
 }
 
+/**
+ * Convert GPP data to an object
+ * @param data
+ * @param {string}
+ */
+function handleGPPData(data = {}) {
+  if (Array.isArray(data)) {
+      let obj = {};
+      for (const element of data) {
+          obj = Object.assign(obj, element);
+      }
+      return JSON.stringify(obj);
+  }
+  return JSON.stringify(data);
+};
+
 /** @type {Submodule} */
 export const intentIqIdSubmodule = {
   /**
@@ -147,10 +162,10 @@ export const intentIqIdSubmodule = {
     }
 
     // Get consent information
-    const cmpData = {}
-    const uspData = uspDataHandler.getConsentData()
-    const gdprData = gdprDataHandler.getConsentData()
-    const gppData = gppDataHandler.getConsentData()
+    const cmpData = {};
+    const uspData = uspDataHandler.getConsentData();
+    const gdprData = gdprDataHandler.getConsentData();
+    const gppData = gppDataHandler.getConsentData();
     let isOptOut = false;
 
     if (uspData) {
@@ -163,7 +178,12 @@ export const intentIqIdSubmodule = {
     }
   
     if (gppData) {
-      cmpData.gpp = gppData.gppString;
+      cmpData.gpp = '';
+
+      if(gppData.parsedSections && 'usnat' in gppData.parsedSections) {
+        cmpData.gpp = handleGPPData(gppData.parsedSections['usnat']);
+      }
+
       cmpData.gpp_sid = gppData.applicableSections;
       isOptOut = true;
     }
@@ -205,7 +225,7 @@ export const intentIqIdSubmodule = {
     url += cmpData.us_privacy ? '&us_privacy=' + encodeURIComponent(cmpData.us_privacy) : '';
     url += cmpData.gdpr ? '&gdpr=' + encodeURIComponent(cmpData.gdpr) : '';
     url += cmpData.gdpr_consent ? '&gdpr_consent=' + encodeURIComponent(cmpData.gdpr_consent) : '';
-    url += cmpData.gpp ? '&gpp=' + encodeURIComponent(cmpData.gpp) : '';
+    url += cmpData.gpp ? '&gpv=' + encodeURIComponent(cmpData.gpp) : '';
     url += cmpData.gpp_sid ? '&gpp_sid=' + encodeURIComponent(cmpData.gpp_sid) : '';
 
     const resp = function (callback) {
