@@ -23,10 +23,25 @@ const PCID_EXPIRY = 365;
 const MODULE_NAME = 'intentIqId';
 export const FIRST_PARTY_KEY = '_iiq_fdata';
 export var FIRST_PARTY_DATA_KEY = '_iiq_fdata';
+export var GROUP_LS_KEY = '_iiq_group';
+export var WITH_IIQ = 'A';
+export var WITHOUT_IIQ = 'B';
+export var PERCENT_LS_KEY = '_iiq_percent';
+export var DEFAULT_PERCENTAGE = 100;
 
 export const storage = getStorageManager({ moduleType: MODULE_TYPE_UID, moduleName: MODULE_NAME });
 
 const INVALID_ID = 'INVALID_ID';
+
+/**
+ * Generate random number between two numbers
+ * @param start
+ * @param end
+ * @return {number}
+ */
+function getRandom(start, end) {
+  return Math.floor(Math.random() * (end - start + 1) + start);
+}
 
 /**
  * Generate standard UUID string
@@ -187,30 +202,61 @@ export const intentIqIdSubmodule = {
       cmpData.gpp_sid = gppData.applicableSections;
     }
 
-    const cookieStorageEnabled = typeof configParams.enableCookieStorage === 'boolean' ? configParams.enableCookieStorage : false
-    if (!FIRST_PARTY_DATA_KEY.includes(configParams.partner)) { FIRST_PARTY_DATA_KEY += '_' + configParams.partner; }
+    const cookieStorageEnabled = typeof configParams.enableCookieStorage === 'boolean' ? configParams.enableCookieStorage : false;
     let rrttStrtTime = 0;
+    let partnerData = {};
+    
+    // If no GDPR, proceed as normal, remove any existing storage otherwise
+    if(!isOptOut) {
+      // Handle A/B testing
+      if (isNaN(configParams.percentage)) {
+        logInfo(MODULE_NAME + ' AB Testing percentage is not defined. Setting default value = ' + DEFAULT_PERCENTAGE);
+        configParams.percentage = DEFAULT_PERCENTAGE;
+      }
 
-    // Read Intent IQ 1st party id or generate it if none exists
-    let firstPartyData = tryParse(readData(FIRST_PARTY_KEY));
+      if (isNaN(configParams.percentage) || configParams.percentage < 0 || configParams.percentage > 100) {
+        logError(MODULE_NAME + 'Percentage - intentIqId submodule requires a valid percentage value');
+        return false;
+      }
 
-    // Remove any existing data if GDPR applies
-    if(isOptOut) {
-      removeData(FIRST_PARTY_KEY);
-    }
+      configParams.group = readData(GROUP_LS_KEY + '_' + configParams.partner);
+      let percentage = readData(PERCENT_LS_KEY + '_' + configParams.partner);
 
-    if (!firstPartyData || !firstPartyData.pcid || firstPartyData.pcidDate) {
-      const firstPartyId = generateGUID();
-      firstPartyData = { 'pcid': firstPartyId, 'pcidDate': Date.now() };
+      if (!configParams.group || !percentage || isNaN(percentage) || percentage != configParams.percentage) {
+        logInfo(MODULE_NAME + 'Generating new Group. Current test group: ' + configParams.group + ', current percentage: ' + percentage + ' , configured percentage: ' + configParams.percentage);
 
-      // No data storage initially if GDPR applies
-      if(!isOptOut) {
+        if (configParams.percentage > getRandom(1, 100)) { configParams.group = WITH_IIQ; } else configParams.group = WITHOUT_IIQ;
+
+        storeData(GROUP_LS_KEY + '_' + configParams.partner, configParams.group)
+        storeData(PERCENT_LS_KEY + '_' + configParams.partner, configParams.percentage + '')
+        logInfo(MODULE_NAME + 'New group: ' + configParams.group)
+      }
+
+      if (configParams.group == WITHOUT_IIQ) {
+        logInfo(MODULE_NAME + 'Group "B". Passive Mode ON.');
+        return true;
+      }
+
+      if (!FIRST_PARTY_DATA_KEY.includes(configParams.partner)) { 
+        FIRST_PARTY_DATA_KEY += '_' + configParams.partner; 
+      }
+
+      // Read Intent IQ 1st party id or generate it if none exists
+      let firstPartyData = tryParse(readData(FIRST_PARTY_KEY));
+
+      if (!firstPartyData || !firstPartyData.pcid || firstPartyData.pcidDate) {
+        const firstPartyId = generateGUID();
+        firstPartyData = { 'pcid': firstPartyId, 'pcidDate': Date.now() };
+
         storeData(FIRST_PARTY_KEY, JSON.stringify(firstPartyData), cookieStorageEnabled);
       }
-    }
 
-    let partnerData = tryParse(readData(FIRST_PARTY_DATA_KEY));
-    if (!partnerData) partnerData = {};
+      let storedPartnerData = tryParse(readData(FIRST_PARTY_DATA_KEY));
+
+      if(storedPartnerData) partnerData = storedPartnerData;
+    } else {
+      removeData(FIRST_PARTY_KEY);
+    }
 
     // use protocol relative urls for http or https
     let url = `https://api.intentiq.com/profiles_engine/ProfilesEngineServlet?at=39&mi=10&dpi=${configParams.partner}&pt=17&dpn=1`;
@@ -218,8 +264,8 @@ export const intentIqIdSubmodule = {
     url += configParams.pai ? '&pai=' + encodeURIComponent(configParams.pai) : '';
     url += firstPartyData.pcid ? '&iiqidtype=2&iiqpcid=' + encodeURIComponent(firstPartyData.pcid) : '';
     url += firstPartyData.pid ? '&pid=' + encodeURIComponent(firstPartyData.pid) : '';
-    url += (partnerData.cttl) ? '&cttl=' + encodeURIComponent(partnerData.cttl) : '';
-    url += (partnerData.rrtt) ? '&rrtt=' + encodeURIComponent(partnerData.rrtt) : '';
+    url += partnerData.cttl ? '&cttl=' + encodeURIComponent(partnerData.cttl) : '';
+    url += partnerData.rrtt ? '&rrtt=' + encodeURIComponent(partnerData.rrtt) : '';
     url += firstPartyData.pcidDate ? '&iiqpciddate=' + encodeURIComponent(firstPartyData.pcidDate) : '';
     url += cmpData.us_privacy ? '&us_privacy=' + encodeURIComponent(cmpData.us_privacy) : '';
     url += cmpData.gdpr ? '&gdpr=' + encodeURIComponent(cmpData.gdpr) : '';
@@ -247,6 +293,9 @@ export const intentIqIdSubmodule = {
             if ('cttl' in respJson) {
               partnerData.cttl = respJson.cttl;
               shouldUpdateLs = true;
+            }
+            if ('eidl' in respJson) {
+              partnerData.eidl = respJson.eidl;
             }
             // If should save and data is empty, means we should save as INVALID_ID
             if (respJson.data == '') {
