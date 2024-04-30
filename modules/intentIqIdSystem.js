@@ -182,7 +182,9 @@ export const intentIqIdSubmodule = {
               storeData(FIRST_PARTY_KEY, JSON.stringify(firstPartyData), cookieStorageEnabled);
               storeData(FIRST_PARTY_DATA_KEY, JSON.stringify(partnerData), cookieStorageEnabled);
             }
-            callback(respJson.data);
+            if (respJson.data?.eids) callback(respJson.data.eids);
+            // eslint-disable-next-line standard/no-callback-literal
+            else callback([])
           } else {
             callback();
           }
@@ -203,8 +205,23 @@ export const intentIqIdSubmodule = {
   eids: {
     'intentIqId': {
       source: 'intentiq.com',
-      atype: 1
-    },
+      atype: 1,
+      getSource: function (data) {
+        return data.source;
+      },
+      getValue: function(data) {
+        if (data?.uids?.length) {
+          return data.uids[0].id
+        }
+        return null
+      },
+      getUidExt: function (data) {
+        if (data?.uids?.length) {
+          return data.uids[0].ext;
+        }
+        return null
+      }
+    }
   }
 };
 
