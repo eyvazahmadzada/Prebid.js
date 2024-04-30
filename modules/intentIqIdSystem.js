@@ -26,12 +26,15 @@ export var FIRST_PARTY_DATA_KEY = '_iiq_fdata';
 export var GROUP_LS_KEY = '_iiq_group';
 export var WITH_IIQ = 'A';
 export var WITHOUT_IIQ = 'B';
+export var OPT_OUT = 'O';
 export var PERCENT_LS_KEY = '_iiq_percent';
 export var DEFAULT_PERCENTAGE = 100;
 
 export const storage = getStorageManager({ moduleType: MODULE_TYPE_UID, moduleName: MODULE_NAME });
 
 const INVALID_ID = 'INVALID_ID';
+
+// @TODO: add opt out features to AB testing
 
 /**
  * Generate random number between two numbers
@@ -181,7 +184,7 @@ export const intentIqIdSubmodule = {
     const uspData = uspDataHandler.getConsentData();
     const gdprData = gdprDataHandler.getConsentData();
     const gppData = gppDataHandler.getConsentData();
-    let isOptOut = false;
+    let isOptedOut = false;
 
     if (uspData) {
       cmpData.us_privacy = uspData;
@@ -190,7 +193,7 @@ export const intentIqIdSubmodule = {
     if (gdprData) {
       cmpData.gdpr = Number(Boolean(gdprData.gdprApplies));
       cmpData.gdpr_consent = gdprData.consentString || '';
-      isOptOut = true;
+      isOptedOut = true;
     }
   
     if (gppData) {
@@ -207,7 +210,7 @@ export const intentIqIdSubmodule = {
     let partnerData = {};
     
     // If no GDPR, proceed as normal, remove any existing storage otherwise
-    if(!isOptOut) {
+    if(!isOptedOut) {
       // Handle A/B testing
       if (isNaN(configParams.percentage)) {
         logInfo(MODULE_NAME + ' AB Testing percentage is not defined. Setting default value = ' + DEFAULT_PERCENTAGE);
@@ -281,9 +284,9 @@ export const intentIqIdSubmodule = {
           if (respJson && respJson.ls) {
             // Store pid field if found in response json
             let shouldUpdateLs = false;
-            if ('isOptOut' in respJson && respJson.isOptOut !== isOptOut) {
-              isOptOut = respJson.isOptOut;
-              firstPartyData.pid = respJson.pid;
+            if ('isOptedOut' in respJson && respJson.isOptedOut !== isOptedOut) {
+              isOptedOut = respJson.isOptedOut;
+              configParams.group = isOptedOut ? OPT_OUT : 
               shouldUpdateLs = true;
             }
             if ('pid' in respJson) {
