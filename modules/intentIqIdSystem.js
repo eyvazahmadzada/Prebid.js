@@ -28,6 +28,7 @@ export var WITH_IIQ = 'A';
 export var WITHOUT_IIQ = 'B';
 export var OPT_OUT = 'O';
 export var PERCENT_LS_KEY = '_iiq_percent';
+export var CLIENT_HINTS_KEY = '_iiq_ch';
 export var DEFAULT_PERCENTAGE = 100;
 
 export const storage = getStorageManager({ moduleType: MODULE_TYPE_UID, moduleName: MODULE_NAME });
@@ -221,6 +222,34 @@ function detectBrowserFromUserAgentData(userAgentData) {
   return 'unknown';
 }
 
+/**
+* Processes raw client hints data into a structured format.
+* @param {object} clientHints - Raw client hints data
+* @return {string} A JSON string of processed client hints or an empty string if no hints
+*/
+function handleClientHints(clientHints) {
+  const chParams = {};
+  for (const key in clientHints) {
+      if (clientHints.hasOwnProperty(key) && clientHints[key] !== '') {
+          if (['brands', 'fullVersionList'].includes(key)) {
+              let handledParam = '';
+              clientHints[key].forEach((element, index) => {
+                  const isNotLast = index < clientHints[key].length - 1;
+                  handledParam += `"${element.brand}";v="${element.version}"${isNotLast ? ', ' : ''}`;
+              });
+              chParams[encoderCH[key]] = handledParam;
+          } else {
+              if (typeof clientHints[key] === 'boolean') {
+                  chParams[encoderCH[key]] = `?${clientHints[key] ? 1 : 0}`;
+              } else {
+                  chParams[encoderCH[key]] = `"${clientHints[key]}"`;
+              }
+          }
+      }
+  }
+  return Object.keys(chParams).length ? JSON.stringify(chParams) : '';
+}
+
 /** @type {Submodule} */
 export const intentIqIdSubmodule = {
   /**
@@ -266,7 +295,6 @@ export const intentIqIdSubmodule = {
     const uspData = uspDataHandler.getConsentData();
     const gdprData = gdprDataHandler.getConsentData();
     const gppData = gppDataHandler.getConsentData();
-    let isOptedOut = false;
 
     if (uspData) {
       cmpData.us_privacy = uspData;
@@ -275,7 +303,9 @@ export const intentIqIdSubmodule = {
     if (gdprData) {
       cmpData.gdpr = Number(Boolean(gdprData.gdprApplies));
       cmpData.gdpr_consent = gdprData.consentString || '';
-      isOptedOut = true;
+
+      // Remove previously stored data if gdpr applies
+      removeData(FIRST_PARTY_DATA_KEY);
     }
   
     if (gppData) {
@@ -290,57 +320,81 @@ export const intentIqIdSubmodule = {
     let rrttStrtTime = 0;
     let partnerData = {};
     
-    // If no GDPR, proceed as normal, remove any existing storage otherwise
-    if(!isOptedOut) {
-      // Handle A/B testing
-      if (isNaN(configParams.percentage)) {
-        logInfo(MODULE_NAME + ' AB Testing percentage is not defined. Setting default value = ' + DEFAULT_PERCENTAGE);
-        configParams.percentage = DEFAULT_PERCENTAGE;
-      }
-
-      if (isNaN(configParams.percentage) || configParams.percentage < 0 || configParams.percentage > 100) {
-        logError(MODULE_NAME + 'Percentage - intentIqId submodule requires a valid percentage value');
-        return false;
-      }
-
-      configParams.group = readData(GROUP_LS_KEY + '_' + configParams.partner);
-      let percentage = readData(PERCENT_LS_KEY + '_' + configParams.partner);
-
-      if (!configParams.group || !percentage || isNaN(percentage) || percentage != configParams.percentage) {
-        logInfo(MODULE_NAME + 'Generating new Group. Current test group: ' + configParams.group + ', current percentage: ' + percentage + ' , configured percentage: ' + configParams.percentage);
-
-        if (configParams.percentage > getRandom(1, 100)) { configParams.group = WITH_IIQ; } else configParams.group = WITHOUT_IIQ;
-
-        storeData(GROUP_LS_KEY + '_' + configParams.partner, configParams.group)
-        storeData(PERCENT_LS_KEY + '_' + configParams.partner, configParams.percentage + '')
-        logInfo(MODULE_NAME + 'New group: ' + configParams.group)
-      }
-
-      if (configParams.group == WITHOUT_IIQ) {
-        logInfo(MODULE_NAME + 'Group "B". Passive Mode ON.');
-        return true;
-      }
-
-      if (!FIRST_PARTY_DATA_KEY.includes(configParams.partner)) { 
-        FIRST_PARTY_DATA_KEY += '_' + configParams.partner; 
-      }
-
-      // Read Intent IQ 1st party id or generate it if none exists
-      let firstPartyData = tryParse(readData(FIRST_PARTY_KEY));
-
-      if (!firstPartyData || !firstPartyData.pcid || firstPartyData.pcidDate) {
-        const firstPartyId = generateGUID();
-        firstPartyData = { 'pcid': firstPartyId, 'pcidDate': Date.now() };
-
-        storeData(FIRST_PARTY_KEY, JSON.stringify(firstPartyData), cookieStorageEnabled);
-      }
-
-      let storedPartnerData = tryParse(readData(FIRST_PARTY_DATA_KEY));
-
-      if(storedPartnerData) partnerData = storedPartnerData;
-    } else {
-      removeData(FIRST_PARTY_KEY);
+    // Handle A/B testing
+    if (isNaN(configParams.percentage)) {
+      logInfo(MODULE_NAME + ' AB Testing percentage is not defined. Setting default value = ' + DEFAULT_PERCENTAGE);
+      configParams.percentage = DEFAULT_PERCENTAGE;
     }
+
+    if (isNaN(configParams.percentage) || configParams.percentage < 0 || configParams.percentage > 100) {
+      logError(MODULE_NAME + 'Percentage - intentIqId submodule requires a valid percentage value');
+      return false;
+    }
+
+    // Read client hints from storage
+    let clientHints = tryParse(readData(CLIENT_HINTS_KEY));
+
+    // Get client hints and save to storage
+    if (navigator.userAgentData) {
+      navigator.userAgentData
+        .getHighEntropyValues([
+          'brands',
+          'mobile',
+          'bitness',
+          'wow64',
+          'architecture',
+          'model',
+          'platform',
+          'platformVersion',
+          'fullVersionList'
+        ])
+        .then(ch => {
+          clientHints = handleClientHints(ch);
+          storeData(CLIENT_HINTS_KEY, clientHints)
+        });
+    }
+
+    if (!FIRST_PARTY_DATA_KEY.includes(configParams.partner)) { 
+      FIRST_PARTY_DATA_KEY += '_' + configParams.partner; 
+    }
+
+    // Read Intent IQ 1st party id or generate it if none exists
+    let firstPartyData = tryParse(readData(FIRST_PARTY_KEY));
+
+    if (!firstPartyData || !firstPartyData.pcid || firstPartyData.pcidDate) {
+      const firstPartyId = generateGUID();
+      firstPartyData = { 'pcid': firstPartyId, 'pcidDate': Date.now() };
+
+      storeData(FIRST_PARTY_KEY, JSON.stringify(firstPartyData), cookieStorageEnabled);
+    }
+
+    configParams.group = readData(GROUP_LS_KEY + '_' + configParams.partner);
+    let percentage = readData(PERCENT_LS_KEY + '_' + configParams.partner);
+
+    // Generate a group
+    if (!configParams.group || !percentage || isNaN(percentage) || percentage != configParams.percentage) {
+      logInfo(MODULE_NAME + 'Generating new Group. Current test group: ' + configParams.group + ', current percentage: ' + percentage + ' , configured percentage: ' + configParams.percentage);
+
+      // Assign opted out group if needed
+      if (firstPartyData.isOptedOut) {
+        configParams.group = OPT_OUT;
+      } else {
+        if (configParams.percentage > getRandom(1, 100)) { configParams.group = WITH_IIQ; } else configParams.group = WITHOUT_IIQ;
+      }
+
+      storeData(GROUP_LS_KEY + '_' + configParams.partner, configParams.group)
+      storeData(PERCENT_LS_KEY + '_' + configParams.partner, configParams.percentage + '')
+      logInfo(MODULE_NAME + 'New group: ' + configParams.group)
+    }
+
+    if (configParams.group == WITHOUT_IIQ) {
+      logInfo(MODULE_NAME + 'Group "B". Passive Mode ON.');
+      return true;
+    }
+
+    let storedPartnerData = tryParse(readData(FIRST_PARTY_DATA_KEY));
+
+    if(storedPartnerData) partnerData = storedPartnerData;
 
     // use protocol relative urls for http or https
     let url = `https://api.intentiq.com/profiles_engine/ProfilesEngineServlet?at=39&mi=10&dpi=${configParams.partner}&pt=17&dpn=1`;
@@ -356,6 +410,7 @@ export const intentIqIdSubmodule = {
     url += cmpData.gdpr_consent ? '&gdpr_consent=' + encodeURIComponent(cmpData.gdpr_consent) : '';
     url += cmpData.gpp ? '&gpv=' + encodeURIComponent(cmpData.gpp) : '';
     url += cmpData.gpp_sid ? '&gpp_sid=' + encodeURIComponent(cmpData.gpp_sid) : '';
+    url += clientHints ? '&uh=' + encodeURIComponent(clientHints) : '';
 
     const resp = function (callback) {
       const callbacks = {
@@ -365,10 +420,17 @@ export const intentIqIdSubmodule = {
           if (respJson && respJson.ls) {
             // Store pid field if found in response json
             let shouldUpdateLs = false;
-            if ('isOptedOut' in respJson && respJson.isOptedOut !== isOptedOut) {
-              isOptedOut = respJson.isOptedOut;
-              configParams.group = isOptedOut ? OPT_OUT : 
-              shouldUpdateLs = true;
+            if ('isOptedOut' in respJson) {
+              if (respJson.isOptedOut !== isOptedOut) {
+                firstPartyData.isOptedOut = respJson.isOptedOut;
+                if (isOptedOut) configParams.group = isOptedOut;
+                shouldUpdateLs = true;
+              }
+
+              if (respJson.isOptedOut === true) {
+                respJson.data = {};
+                partnerData.data = {};
+              }
             }
             if ('pid' in respJson) {
               firstPartyData.pid = respJson.pid;
