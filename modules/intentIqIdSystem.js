@@ -27,6 +27,7 @@ export var GROUP_LS_KEY = '_iiq_group';
 export var WITH_IIQ = 'A';
 export var WITHOUT_IIQ = 'B';
 export var OPT_OUT = 'O';
+export var BLACK_LIST = 'L';
 export var PERCENT_LS_KEY = '_iiq_percent';
 export var CLIENT_HINTS_KEY = '_iiq_ch';
 export var DEFAULT_PERCENTAGE = 100;
@@ -284,6 +285,8 @@ export const intentIqIdSubmodule = {
 
     // Check if current browser is in blacklist
     if (browserBlackList && browserBlackList.includes(currentBrowserLowerCase)) {
+      if (typeof configParams.callback === 'function') this.callback('', BLACK_LIST);
+
       logError('User ID - intentIqId submodule: browser is in blacklist!');
       return;
     }
@@ -460,6 +463,9 @@ export const intentIqIdSubmodule = {
               storeData(FIRST_PARTY_DATA_KEY, JSON.stringify(partnerData), cookieStorageEnabled);
             }
             callback(respJson.data);
+
+            // User callback
+            configParams.callback(respJson.data, configParams.group);
           } else {
             callback();
           }
