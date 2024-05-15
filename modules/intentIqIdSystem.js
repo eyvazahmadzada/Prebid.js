@@ -450,6 +450,11 @@ export const intentIqIdSubmodule = {
             if (respJson.data == '') {
               respJson.data = INVALID_ID;
             } else {
+              // If data is an encrypted string, assume it is an id with source intentiq.com
+              if (typeof respJson.data === 'string') {
+                respJson.data = { eids: [ respJson.data ]}
+              }
+
               partnerData.data = respJson.data;
               shouldUpdateLs = true;
             }
