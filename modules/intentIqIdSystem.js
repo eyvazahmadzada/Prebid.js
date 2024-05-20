@@ -62,42 +62,183 @@ function generateGUID() {
   return guid;
 }
 
+let sessionKey;
+
 /**
- * Read Intent IQ data from cookie or local storage
- * @param key
- * @return {string}
+ * Generate a session key.
+ * @returns {Promise<CryptoKey>} Resolves to a CryptoKey object.
  */
-export function readData(key) {
-  try {
-    if (storage.hasLocalStorage()) {
-      return storage.getDataFromLocalStorage(key);
-    }
-    if (storage.cookiesAreEnabled()) {
-      return storage.getCookie(key);
-    }
-  } catch (error) {
-    logError(error);
-  }
+async function generateKey() {
+  return window.crypto.subtle.generateKey(
+    { name: "AES-GCM", length: 256 },
+    true,
+    ["encrypt", "decrypt"]
+  );
 }
 
 /**
- * Store Intent IQ data in either cookie or local storage
- * expiration date: 365 days
- * @param key
- * @param {string} value IntentIQ ID value to sintentIqIdSystem_spec.jstore
+ * Export a session key.
+ * @param {CryptoKey} key The CryptoKey to export.
+ * @returns {Promise<Object>} Resolves to a JWK object.
  */
-function storeData(key, value, cookieStorageEnabled = false) {
+async function exportKey(key) {
+  return window.crypto.subtle.exportKey('jwk', key);
+}
+
+/**
+ * Import a session key.
+ * @param {Object} jwkKey The JWK object to import.
+ * @returns {Promise<CryptoKey>} Resolves to a CryptoKey object.
+ */
+async function importKey(jwkKey) {
+  return window.crypto.subtle.importKey(
+    'jwk',
+    jwkKey,
+    { name: 'AES-GCM' },
+    false,
+    ['encrypt', 'decrypt']
+  );
+}
+
+/**
+ * Encrypt data.
+ * @param {string} plainText The text to encrypt.
+ * @param {CryptoKey} key The key to use for encryption.
+ * @returns {Promise<Object>} Resolves to an object with iv and encrypted data.
+ */
+async function encryptData(plainText, key) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const enc = new TextEncoder();
+  const encoded = enc.encode(plainText);
+
+  const encrypted = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv: iv },
+    key,
+    encoded
+  );
+
+  return {
+    iv: Array.from(iv),
+    encryptedData: Array.from(new Uint8Array(encrypted))
+  };
+}
+
+/**
+ * Decrypt data.
+ * @param {Object} encryptedObj Object with iv and encrypted data.
+ * @param {CryptoKey} key The key to use for decryption.
+ * @returns {Promise<string>} Resolves to the decrypted text.
+ */
+async function decryptData(encryptedObj, key) {
+  const iv = new Uint8Array(encryptedObj.iv);
+  const data = new Uint8Array(encryptedObj.encryptedData);
+
+  const decrypted = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: iv },
+    key,
+    data
+  );
+
+  const dec = new TextDecoder();
+  return dec.decode(decrypted);
+}
+
+/**
+ * Initialize the session key.
+ * @returns {Promise<void>} Resolves when the session key is ready.
+ */
+async function initializeSessionKey() {
+  if (!sessionKey) {
+    const storedKey = localStorage.getItem('sessionKey');
+    if (storedKey) {
+      sessionKey = await importKey(JSON.parse(storedKey));
+    } else {
+      sessionKey = await generateKey();
+      const exportedKey = await exportKey(sessionKey);
+      localStorage.setItem('sessionKey', JSON.stringify(exportedKey));
+    }
+  }
+}
+
+// Initialize the session key on page load
+initializeSessionKey().then(() => {
+  console.log('Session key initialized');
+}).catch(error => {
+  console.error('Failed to initialize session key:', error);
+});
+
+
+/**
+ * Read data from storage with optional decryption.
+ * @param {string} key The key for retrieving data.
+ * @param {boolean} decrypt Decrypt data if true.
+ * @returns {Promise<string|null>} Resolves to the data or null if not found.
+ */
+async function readData(key, decrypt = false) {
+  try {
+    await initializeSessionKey();
+
+    let data;
+    if (storage.hasLocalStorage()) {
+      data = storage.getDataFromLocalStorage(key);
+    } else if (storage.cookiesAreEnabled()) {
+      data = storage.getCookie(key);
+    }
+
+    if (data && decrypt) {
+      const encryptedObj = JSON.parse(data);
+      const decryptedData = await decryptData(encryptedObj, sessionKey);
+      return decryptedData;
+    }
+
+    return data;
+  } catch (error) {
+    logError(error);
+  }
+  return null;
+}
+
+let decryptedDataCache = null;
+
+/**
+ * Read data synchronously with optional decryption.
+ * @param {string} key The key for retrieving data.
+ * @param {boolean} decrypt Decrypt data if true.
+ */
+function readDataSync(key, decrypt = false) {
+  readData(key, decrypt).then(data => {
+    decryptedDataCache = data;
+  }).catch(error => {
+    logError(error);
+    decryptedDataCache = null;
+  });
+}
+
+/**
+ * Store data in storage with optional encryption.
+ * @param {string} key The key for storing data.
+ * @param {string} value The value to store.
+ * @param {boolean} cookieStorageEnabled Use cookies if true.
+ * @param {boolean} encrypt Encrypt data if true.
+ */
+async function storeData(key, value, cookieStorageEnabled = false, encrypt = false) {
   try {
     logInfo(MODULE_NAME + ': storing data: key=' + key + ' value=' + value);
 
-    if (value) {
-      if (storage.hasLocalStorage()) {
-        storage.setDataInLocalStorage(key, value);
-      }
-      const expiresStr = (new Date(Date.now() + (PCID_EXPIRY * (60 * 60 * 24 * 1000)))).toUTCString();
-      if (storage.cookiesAreEnabled() && cookieStorageEnabled) {
-        storage.setCookie(key, value, expiresStr, 'LAX');
-      }
+    let dataToStore = value;
+
+    if (encrypt) {
+      await initializeSessionKey();
+      const encrypted = await encryptData(value, sessionKey);
+      dataToStore = JSON.stringify(encrypted);
+    }
+
+    if (storage.hasLocalStorage()) {
+      storage.setDataInLocalStorage(key, dataToStore);
+    }
+    const expiresStr = (new Date(Date.now() + (PCID_EXPIRY * (60 * 60 * 24 * 1000)))).toUTCString();
+    if (storage.cookiesAreEnabled() && cookieStorageEnabled) {
+      storage.setCookie(key, dataToStore, expiresStr, 'LAX');
     }
   } catch (error) {
     logError(error);
@@ -395,9 +536,9 @@ export const intentIqIdSubmodule = {
       return true;
     }
 
-    let storedPartnerData = tryParse(readData(FIRST_PARTY_DATA_KEY));
-
-    if(storedPartnerData) partnerData = storedPartnerData;
+    readDataSync(FIRST_PARTY_DATA_KEY, true);
+    let storedPartnerData = tryParse(decryptedDataCache);
+    if (storedPartnerData) partnerData = storedPartnerData;
 
     // use protocol relative urls for http or https
     let url = `https://api.intentiq.com/profiles_engine/ProfilesEngineServlet?at=39&mi=10&dpi=${configParams.partner}&pt=17&dpn=1`;
@@ -465,7 +606,7 @@ export const intentIqIdSubmodule = {
             if (shouldUpdateLs === true) {
               partnerData.date = Date.now();
               storeData(FIRST_PARTY_KEY, JSON.stringify(firstPartyData), cookieStorageEnabled);
-              storeData(FIRST_PARTY_DATA_KEY, JSON.stringify(partnerData), cookieStorageEnabled);
+              storeData(FIRST_PARTY_DATA_KEY, JSON.stringify(partnerData), cookieStorageEnabled, true);
             }
             callback(respJson.data);
 
