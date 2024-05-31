@@ -458,7 +458,6 @@ export const intentIqIdSubmodule = {
       if(gppData.parsedSections && 'usnat' in gppData.parsedSections) {
         cmpData.gpp = handleGPPData(gppData.parsedSections['usnat']);
       }
-      cmpData.gpp_sid = gppData.applicableSections;
     }
 
     let rrttStrtTime = 0;
@@ -550,10 +549,9 @@ export const intentIqIdSubmodule = {
     url += partnerData.rrtt ? '&rrtt=' + encodeURIComponent(partnerData.rrtt) : '';
     url += firstPartyData.pcidDate ? '&iiqpciddate=' + encodeURIComponent(firstPartyData.pcidDate) : '';
     url += cmpData.us_privacy ? '&us_privacy=' + encodeURIComponent(cmpData.us_privacy) : '';
-    url += cmpData.gdpr ? '&gdpr=' + encodeURIComponent(cmpData.gdpr) : '';
+    url += cmpData.gdpr ? '&gdprv=' + encodeURIComponent(cmpData.gdpr) : '';
     url += cmpData.gdpr_consent ? '&gdpr_consent=' + encodeURIComponent(cmpData.gdpr_consent) : '';
     url += cmpData.gpp ? '&gpv=' + encodeURIComponent(cmpData.gpp) : '';
-    url += cmpData.gpp_sid ? '&gpp_sid=' + encodeURIComponent(cmpData.gpp_sid) : '';
     url += clientHints ? '&uh=' + encodeURIComponent(clientHints) : '';
 
     const resp = function (callback) {
