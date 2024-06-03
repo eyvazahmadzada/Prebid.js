@@ -443,7 +443,7 @@ export const intentIqIdSubmodule = {
     if (uspData) {
       cmpData.us_privacy = uspData;
     }
-  
+
     if (gdprData) {
       cmpData.gdpr = Number(Boolean(gdprData.gdprApplies));
       cmpData.gdpr_consent = gdprData.consentString || '';
@@ -451,7 +451,7 @@ export const intentIqIdSubmodule = {
       // Remove previously stored data if gdpr applies
       removeData(FIRST_PARTY_DATA_KEY);
     }
-  
+
     if (gppData) {
       cmpData.gpp = '';
 
@@ -462,7 +462,7 @@ export const intentIqIdSubmodule = {
 
     let rrttStrtTime = 0;
     let partnerData = {};
-    
+
     // Handle A/B testing
     if (isNaN(configParams.percentage)) {
       logInfo(MODULE_NAME + ' AB Testing percentage is not defined. Setting default value = ' + DEFAULT_PERCENTAGE);
@@ -497,8 +497,8 @@ export const intentIqIdSubmodule = {
         });
     }
 
-    if (!FIRST_PARTY_DATA_KEY.includes(configParams.partner)) { 
-      FIRST_PARTY_DATA_KEY += '_' + configParams.partner; 
+    if (!FIRST_PARTY_DATA_KEY.includes(configParams.partner)) {
+      FIRST_PARTY_DATA_KEY += '_' + configParams.partner
     }
 
     // Read Intent IQ 1st party id or generate it if none exists
@@ -563,9 +563,9 @@ export const intentIqIdSubmodule = {
             // Store pid field if found in response json
             let shouldUpdateLs = false;
             if ('isOptedOut' in respJson) {
-              if (respJson.isOptedOut !== isOptedOut) {
+              if (respJson.isOptedOut !== firstPartyData.isOptedOut) {
                 firstPartyData.isOptedOut = respJson.isOptedOut;
-                if (isOptedOut) configParams.group = isOptedOut;
+                if (firstPartyData.isOptedOut) configParams.group = firstPartyData.isOptedOut;
                 shouldUpdateLs = true;
               }
 
