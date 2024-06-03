@@ -204,7 +204,7 @@ export const intentIqIdSubmodule = {
 
     let partnerData = tryParse(readData(FIRST_PARTY_DATA_KEY));
 
-    if (partnerData.data) {
+    if (partnerData && partnerData.data) {
       console.log(decryptData(partnerData.data));
     }
 
@@ -222,7 +222,7 @@ export const intentIqIdSubmodule = {
 
     const resp = function (callback) {
       const callbacks = {
-        success: response => {
+        success: async response => {
           let respJson = tryParse(response);
           // If response is a valid json and should save is true
           if (respJson && respJson.ls) {
@@ -240,7 +240,7 @@ export const intentIqIdSubmodule = {
             if (respJson.data == '') {
               respJson.data = INVALID_ID;
             } else {
-              partnerData.data = encryptData(JSON.stringify(respJson.data));
+              partnerData.data = await encryptData(JSON.stringify(respJson.data));
               shouldUpdateLs = true;
             }
             if (rrttStrtTime && rrttStrtTime > 0) {
