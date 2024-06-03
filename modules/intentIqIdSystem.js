@@ -27,6 +27,71 @@ export const storage = getStorageManager({ moduleType: MODULE_TYPE_UID, moduleNa
 
 const INVALID_ID = 'INVALID_ID';
 
+let sessionKey = null;
+
+/**
+ * Generate a session key if it doesn't exist and store it in a runtime variable.
+ * @returns {Promise<CryptoKey>} The generated CryptoKey.
+ */
+async function initializeSessionKey() {
+  if (!sessionKey) {
+    sessionKey = await window.crypto.subtle.generateKey(
+      {
+        name: 'AES-GCM',
+        length: 256
+      },
+      true,
+      ['encrypt', 'decrypt']
+    );
+  }
+  return sessionKey;
+}
+
+/**
+ * Encrypts plaintext using the session key.
+ * @param {string} plainText The plaintext to encrypt.
+ * @returns {Promise<string>} The encrypted text as a base64 string.
+ */
+async function encryptData(plainText) {
+  const key = await initializeSessionKey();
+  const iv = crypto.getRandomValues(new Uint8Array(12)); // Initialization vector (12 bytes)
+  const enc = new TextEncoder();
+  const encoded = enc.encode(plainText);
+
+  const encrypted = await window.crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv: iv },
+    key,
+    encoded
+  );
+
+  const encryptedData = {
+    iv: Array.from(iv),
+    encrypted: Array.from(new Uint8Array(encrypted))
+  };
+
+  return btoa(JSON.stringify(encryptedData));
+}
+
+/**
+ * Decrypts ciphertext using the session key.
+ * @param {string} encryptedText The encrypted text as a base64 string.
+ * @returns {Promise<string>} The decrypted plaintext.
+ */
+async function decryptData(encryptedText) {
+  const key = await initializeSessionKey();
+  const encryptedData = JSON.parse(atob(encryptedText));
+  const iv = new Uint8Array(encryptedData.iv);
+  const data = new Uint8Array(encryptedData.encrypted);
+
+  const decrypted = await window.crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: iv },
+    key,
+    data
+  );
+
+  return new TextDecoder().decode(decrypted);
+}
+
 /**
  * Generate standard UUID string
  * @return {string}
@@ -138,6 +203,11 @@ export const intentIqIdSubmodule = {
     }
 
     let partnerData = tryParse(readData(FIRST_PARTY_DATA_KEY));
+
+    if (partnerData.data) {
+      console.log(decryptData(partnerData.data));
+    }
+
     if (!partnerData) partnerData = {};
 
     // use protocol relative urls for http or https
@@ -170,7 +240,7 @@ export const intentIqIdSubmodule = {
             if (respJson.data == '') {
               respJson.data = INVALID_ID;
             } else {
-              partnerData.data = respJson.data;
+              partnerData.data = encryptData(JSON.stringify(respJson.data));
               shouldUpdateLs = true;
             }
             if (rrttStrtTime && rrttStrtTime > 0) {
