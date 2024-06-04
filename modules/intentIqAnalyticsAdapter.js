@@ -17,7 +17,7 @@ const REPORTER_ID = Date.now() + '_' + getRandom(0, 1000);
 const FIRST_PARTY_KEY = '_iiq_fdata';
 const FIRST_PARTY_DATA_KEY = '_iiq_fdata';
 const GROUP_LS_KEY = '_iiq_group';
-const PRECENT_LS_KEY = '_iiq_percent';
+const PERCENT_LS_KEY = '_iiq_percent';
 const JSVERSION = 5.3
 
 const PARAMS_NAMES = {
@@ -57,16 +57,20 @@ const PARAMS_NAMES = {
   partnerId: 'partnerId'
 };
 
-var initOptions = {
-  lsValueInitialized: false
-}
-
-// Events needed
-const {
-  BID_WON
-} = EVENTS;
-
 let iiqAnalyticsAnalyticsAdapter = Object.assign(adapter({ defaultUrl, analyticsType }), {
+  initOptions: {
+    lsValueInitialized: false,
+    partner: null,
+    fpid: null,
+    userGroup: null,
+    userPercentage: null,
+    currentGroup: null,
+    currentPercentage: null,
+    dataInLs: null,
+    eidl: null,
+    lsIdsInitialized: false,
+    manualReport: false
+  },
   track({ eventType, args }) {
     switch (eventType) {
       case BID_WON:
@@ -77,6 +81,11 @@ let iiqAnalyticsAnalyticsAdapter = Object.assign(adapter({ defaultUrl, analytics
     }
   }
 });
+
+// Events needed
+const {
+  BID_WON
+} = EVENTS;
 
 function readData(key) {
   try {
@@ -92,10 +101,10 @@ function readData(key) {
 }
 
 function initLsValues() {
-  if (initOptions.lsValueInitialized) return;
-  initOptions.fpid = readData(FIRST_PARTY_KEY);
+  if (iiqAnalyticsAnalyticsAdapter.initOptions.lsValueInitialized) return;
+  iiqAnalyticsAnalyticsAdapter.initOptions.fpid = readData(FIRST_PARTY_KEY);
   let iiqArr = config.getConfig('userSync.userIds').filter(m => m.name == 'intentIqId');
-  if (iiqArr && iiqArr.length > 0) initOptions.lsValueInitialized = true;
+  if (iiqArr && iiqArr.length > 0) iiqAnalyticsAnalyticsAdapter.initOptions.lsValueInitialized = true;
   if (!iiqArr) iiqArr = [];
   if (iiqArr.length == 0) {
     iiqArr.push({
@@ -108,26 +117,26 @@ function initLsValues() {
   }
   if (iiqArr && iiqArr.length > 0) {
     if (iiqArr[0].params && iiqArr[0].params.partner && !isNaN(iiqArr[0].params.partner)) {
-      initOptions.partner = iiqArr[0].params.partner;
-      initOptions.userGroup = iiqArr[0].params.group || 'U';
-      initOptions.userPercentage = iiqArr[0].params.percentage || '-1';
+      iiqAnalyticsAnalyticsAdapter.initOptions.partner = iiqArr[0].params.partner;
+      iiqAnalyticsAnalyticsAdapter.initOptions.userGroup = iiqArr[0].params.group || 'U';
+      iiqAnalyticsAnalyticsAdapter.initOptions.userPercentage = iiqArr[0].params.percentage || '-1';
 
-      initOptions.currentGroup = readData(GROUP_LS_KEY + '_' + initOptions.partner)
-      initOptions.currentPercentage = readData(PRECENT_LS_KEY + '_' + initOptions.partner)
+      iiqAnalyticsAnalyticsAdapter.initOptions.currentGroup = readData(GROUP_LS_KEY + '_' + iiqAnalyticsAnalyticsAdapter.initOptions.partner);
+      iiqAnalyticsAnalyticsAdapter.initOptions.currentPercentage = +readData(PERCENT_LS_KEY + '_' + iiqAnalyticsAnalyticsAdapter.initOptions.partner);
     }
   }
 }
 
 function initReadLsIds() {
-  if (isNaN(initOptions.partner) || initOptions.partner == -1) return;
+  if (isNaN(iiqAnalyticsAnalyticsAdapter.initOptions.partner) || iiqAnalyticsAnalyticsAdapter.initOptions.partner == -1) return;
   try {
-    initOptions.dataInLs = null;
-    let iData = readData(FIRST_PARTY_DATA_KEY + '_' + initOptions.partner)
+    iiqAnalyticsAnalyticsAdapter.initOptions.dataInLs = null;
+    let iData = readData(FIRST_PARTY_DATA_KEY + '_' + iiqAnalyticsAnalyticsAdapter.initOptions.partner)
     if (iData) {
-      initOptions.lsIdsInitialized = true;
+      iiqAnalyticsAnalyticsAdapter.initOptions.lsIdsInitialized = true;
       let pData = JSON.parse(iData);
-      initOptions.dataInLs = pData.data;
-      initOptions.eidl = pData.eidl || -1;
+      iiqAnalyticsAnalyticsAdapter.initOptions.dataInLs = pData.data;
+      iiqAnalyticsAnalyticsAdapter.initOptions.eidl = pData.eidl || -1;
     }
   } catch (e) {
     logError(e)
@@ -135,9 +144,11 @@ function initReadLsIds() {
 }
 
 function bidWon(args) {
-  if (!initOptions.lsValueInitialized) { initLsValues(); }
-  if (initOptions.lsValueInitialized && !initOptions.lsIdsInitialized) { initReadLsIds(); }
-  if (!initOptions.manualReport) { ajax(constructFulllUrl(preparePayload(args, true)), undefined, null, { method: 'GET' }); }
+  if (!iiqAnalyticsAnalyticsAdapter.initOptions.lsValueInitialized) { initLsValues(); }
+  if (iiqAnalyticsAnalyticsAdapter.initOptions.lsValueInitialized && !iiqAnalyticsAnalyticsAdapter.initOptions.lsIdsInitialized) { initReadLsIds(); }
+  if (!iiqAnalyticsAnalyticsAdapter.initOptions.manualReport) {
+    ajax(constructFullUrl(preparePayload(args, true)), undefined, null, { method: 'GET' });
+  }
 
   logInfo('IIQ ANALYTICS -> BID WON')
 }
@@ -149,17 +160,17 @@ function getRandom(start, end) {
 function preparePayload(data) {
   let result = getDefaultDataObject();
 
-  result[PARAMS_NAMES.partnerId] = initOptions.partner;
+  result[PARAMS_NAMES.partnerId] = iiqAnalyticsAnalyticsAdapter.initOptions.partner;
   result[PARAMS_NAMES.prebidVersion] = prebidVersion;
   result[PARAMS_NAMES.refferer] = getRefferer();
-  result[PARAMS_NAMES.userActualPercentage] = initOptions.userPercentage;
+  result[PARAMS_NAMES.userActualPercentage] = iiqAnalyticsAnalyticsAdapter.initOptions.userPercentage;
 
-  if (initOptions.userGroup && initOptions.userGroup != '') { result[PARAMS_NAMES.ABTestingConfigurationSource] = 'group'; } else if (initOptions.userPercentage && !isNaN(initOptions.userPercentage)) { result[PARAMS_NAMES.ABTestingConfigurationSource] = 'percentage'; }
+  if (iiqAnalyticsAnalyticsAdapter.initOptions.userGroup && iiqAnalyticsAnalyticsAdapter.initOptions.userGroup != '') { result[PARAMS_NAMES.ABTestingConfigurationSource] = 'group'; } else if (iiqAnalyticsAnalyticsAdapter.initOptions.userPercentage && !isNaN(iiqAnalyticsAnalyticsAdapter.initOptions.userPercentage)) { result[PARAMS_NAMES.ABTestingConfigurationSource] = 'percentage'; }
 
-  result[PARAMS_NAMES.abPercentage] = initOptions.currentPercentage;
-  result[PARAMS_NAMES.abTestGroup] = initOptions.currentGroup;
+  result[PARAMS_NAMES.abPercentage] = iiqAnalyticsAnalyticsAdapter.initOptions.currentPercentage;
+  result[PARAMS_NAMES.abTestGroup] = iiqAnalyticsAnalyticsAdapter.initOptions.currentGroup;
 
-  result[PARAMS_NAMES.isInTestGroup] = initOptions.currentGroup == 'A';
+  result[PARAMS_NAMES.isInTestGroup] = iiqAnalyticsAnalyticsAdapter.initOptions.currentGroup == 'A';
 
   result[PARAMS_NAMES.agentId] = REPORTER_ID;
 
@@ -171,9 +182,9 @@ function preparePayload(data) {
 }
 
 function fillEidsData(result) {
-  if (initOptions.lsIdsInitialized) {
-    result[PARAMS_NAMES.hadEidsInLocalStorage] = initOptions.eidl && initOptions.eidl > 0;
-    result[PARAMS_NAMES.auctionEidsLegth] = initOptions.eidl || -1;
+  if (iiqAnalyticsAnalyticsAdapter.initOptions.lsIdsInitialized) {
+    result[PARAMS_NAMES.hadEidsInLocalStorage] = iiqAnalyticsAnalyticsAdapter.initOptions.eidl && iiqAnalyticsAnalyticsAdapter.initOptions.eidl > 0;
+    result[PARAMS_NAMES.auctionEidsLegth] = iiqAnalyticsAnalyticsAdapter.initOptions.eidl || -1;
   }
 }
 
@@ -208,11 +219,11 @@ function getDefaultDataObject() {
   }
 }
 
-function constructFulllUrl(data) {
+function constructFullUrl(data) {
   let report = []
   data = btoa(JSON.stringify(data))
   report.push(data)
-  return defaultUrl + '?pid=' + initOptions.partner +
+  return defaultUrl + '?pid=' + iiqAnalyticsAnalyticsAdapter.initOptions.partner +
     '&mct=1' +
     ((iiqAnalyticsAnalyticsAdapter.initOptions && iiqAnalyticsAnalyticsAdapter.initOptions.fpid)
       ? '&iiqid=' + encodeURIComponent(iiqAnalyticsAnalyticsAdapter.initOptions.fpid.pcid) : '') +
